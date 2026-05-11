@@ -1,0 +1,31 @@
+# Dataset / images
+data/
+
+# Model weights & checkpoints
+*.pth
+*.pt
+*.h5
+*.pkl
+*.ckpt
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
