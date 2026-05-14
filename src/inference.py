@@ -23,6 +23,7 @@ from PIL import Image
 
 import config
 from src.feature_extractor import build_feature_model
+from src.preprocessor import load_preprocessors
 from src.utils import get_logger, load_label_encoder, parse_class_name
 
 logger = get_logger(__name__)
@@ -38,8 +39,15 @@ def load_inference_pipeline(model_dir: Path = config.MODELS_DIR) -> dict:
 
     Returns a dict with:
         feature_model  — frozen MobileNetV2+GAP (rebuilt from Keras)
-        xgb_model      — loaded XGBClassifier (XGBoost JSON)
+        scaler         — fitted StandardScaler (1280 features → mean 0, std 1)
+        pca            — fitted PCA (1280 → 256 components)
+        xgb_model      — loaded XGBClassifier (XGBoost JSON, expects 256-dim input)
         label_encoder  — fitted sklearn LabelEncoder
+
+    The scaler and pca are loaded from disk (outputs/models/scaler.pkl and
+    outputs/models/pca.pkl).  They are None if preprocessing was skipped
+    during training (--skip-preprocessing flag).  In that case XGBoost
+    receives the raw 1280-dim features directly.
     """
     import xgboost as xgb
 
@@ -65,8 +73,29 @@ def load_inference_pipeline(model_dir: Path = config.MODELS_DIR) -> dict:
     logger.info("Loading label encoder from %s", le_path)
     label_encoder = load_label_encoder(le_path)
 
+    # Load scaler + PCA if they exist (only created when config.USE_PCA=True)
+    scaler, pca = None, None
+    if config.SCALER_PATH.exists() and config.PCA_PATH.exists():
+        logger.info("Loading scaler and PCA from %s", model_dir)
+        scaler, pca = load_preprocessors()
+        logger.info(
+            "Scaler + PCA loaded — features will be reduced from 1280 → %d dims",
+            pca.n_components_,
+        )
+    elif config.USE_PCA:
+        # PCA is enabled in config but files are missing — something went wrong
+        logger.warning(
+            "USE_PCA=True but scaler.pkl / pca.pkl not found in %s. "
+            "Re-run scripts/train.py to generate them.", model_dir
+        )
+    else:
+        # USE_PCA=False: no scaler/PCA expected — raw 1280-dim features used
+        logger.info("PCA disabled (USE_PCA=False) — using raw 1280-dim features.")
+
     return {
         "feature_model": feature_model,
+        "scaler": scaler,
+        "pca": pca,
         "xgb_model": xgb_model,
         "label_encoder": label_encoder,
     }
@@ -125,9 +154,18 @@ def predict_disease(
             ...
         ]
     """
-    img_batch = preprocess_field_photo(image_path)                    # (1, H, W, 3)
-    features = pipeline["feature_model"].predict(img_batch, verbose=0)  # (1, 1280)
-    probas = pipeline["xgb_model"].predict_proba(features)[0]         # (15,) — one per class
+    img_batch = preprocess_field_photo(image_path)                       # (1, H, W, 3)
+    features = pipeline["feature_model"].predict(img_batch, verbose=0)   # (1, 1280)
+
+    # Apply StandardScaler + PCA if the pipeline includes them (trained with preprocessing)
+    scaler = pipeline.get("scaler")
+    pca    = pipeline.get("pca")
+    if scaler is not None and pca is not None:
+        features = scaler.transform(features)        # (1, 1280) → mean 0, std 1
+        features = pca.transform(features)           # (1, 1280) → (1, 256)
+        logger.debug("Feature dim after Scaler+PCA: %s", features.shape)
+
+    probas = pipeline["xgb_model"].predict_proba(features)[0]            # (15,) — one per class
 
     top_indices = np.argsort(probas)[::-1][:top_k]
     label_encoder = pipeline["label_encoder"]

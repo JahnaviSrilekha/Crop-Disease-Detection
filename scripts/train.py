@@ -1,14 +1,16 @@
 """
 CLI: End-to-end training pipeline.
 
-Loads cached features → trains XGBoost baseline → optionally runs Optuna
-tuning → evaluates on test set → saves model and all output artefacts.
+Loads cached features → SMOTE oversampling → StandardScaler + PCA →
+trains XGBoost baseline → optionally runs Optuna tuning → evaluates on
+test set → saves model and all output artefacts.
 
 Usage:
   python scripts/train.py                        # Full run with Optuna tuning
   python scripts/train.py --skip-tuning          # Baseline only (fast)
   python scripts/train.py --n-trials 20          # Fewer Optuna trials
   python scripts/train.py --subsample 0.1        # Use 10% feature cache (for testing)
+  python scripts/train.py --skip-preprocessing   # Skip SMOTE+PCA (use raw 1280-dim features)
 
 Requires feature caches to exist. Run scripts/extract_features.py first.
 """
@@ -35,6 +37,7 @@ from src.evaluate import (
     save_classification_report,
 )
 from src.feature_extractor import load_features
+from src.preprocessor import run_preprocessing
 from src.utils import get_logger, load_label_encoder, setup_output_dirs
 
 logger = get_logger("train")
@@ -58,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=1.0,
         help="Fraction of cached features to use (0 < x <= 1.0). Default: 1.0.",
+    )
+    p.add_argument(
+        "--skip-preprocessing",
+        action="store_true",
+        help="Skip SMOTE + PCA; train XGBoost on raw 1280-dim features.",
     )
     return p.parse_args()
 
@@ -114,6 +122,26 @@ def main() -> None:
     le = load_label_encoder(config.LABEL_ENCODER_PATH)
     label_names = list(le.classes_)
     logger.info("Classes: %d labels loaded", len(label_names))
+
+    # ---- SMOTE + StandardScaler + PCA ---------------------------------------
+    # NOTE: SMOTE and sample weights (in classifier.py) are REDUNDANT.
+    # SMOTE balances classes → weights become ~1.0 → weights do nothing.
+    # Skipping SMOTE lets the natural 21x imbalance stand so sample weights
+    # are meaningful (rare class samples get up to 21x higher gradient signal).
+    if args.skip_preprocessing:
+        logger.info(
+            "Skipping SMOTE + PCA (--skip-preprocessing). "
+            "Sample weights in XGBoost will handle class imbalance directly."
+        )
+    else:
+        logger.info("Running SMOTE oversampling + StandardScaler + PCA...")
+        X_train, y_train, X_val, X_test, _scaler, _pca = run_preprocessing(
+            X_train, y_train, X_val, X_test
+        )
+        logger.info(
+            "Preprocessing complete — train: %s, val: %s, test: %s",
+            X_train.shape, X_val.shape, X_test.shape,
+        )
 
     # ---- Baseline training --------------------------------------------------
     logger.info("Training baseline XGBoost model...")

@@ -195,7 +195,10 @@ def plot_optuna_history(study, output_path: Path) -> None:
     """Save Optuna optimisation history (best value per trial)."""
     try:
         import optuna.visualization.matplotlib as ovm
-        fig = ovm.plot_optimization_history(study)
+        # plot_optimization_history returns an Axes object, not a Figure.
+        # Retrieve the parent Figure via ax.figure before calling savefig.
+        ax = ovm.plot_optimization_history(study)
+        fig = ax.figure
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=120, bbox_inches="tight")
         plt.close(fig)

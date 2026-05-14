@@ -19,7 +19,7 @@ import numpy as np
 import optuna
 import xgboost as xgb
 from sklearn.metrics import f1_score
-from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.model_selection import StratifiedKFold
 
 import config
 from src.utils import get_logger
@@ -34,6 +34,36 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 # Baseline training
 # ---------------------------------------------------------------------------
 
+def compute_sample_weights(y: np.ndarray) -> np.ndarray:
+    """
+    Compute per-sample weights inversely proportional to class frequency.
+
+    This counteracts the "catch-all bin" problem where XGBoost defaults to
+    predicting frequent/easy classes for uncertain samples.  Rare classes
+    receive higher weight so their misclassification hurts the loss more.
+
+    Example: if Potato_healthy has 106 samples and Tomato_TYLCV has 2245,
+    Potato_healthy samples each get weight ~21× higher than Tomato_TYLCV.
+
+    Args:
+        y: integer label array (N,)
+
+    Returns:
+        sample_weights: float array (N,) where weight[i] = N / (n_classes * count[y[i]])
+    """
+    unique, counts = np.unique(y, return_counts=True)
+    n_classes = len(unique)
+    n_total   = len(y)
+    freq_map  = dict(zip(unique, counts))
+    weights   = np.array(
+        [n_total / (n_classes * freq_map[label]) for label in y],
+        dtype=np.float32,
+    )
+    logger.info("Sample weights — min: %.3f  max: %.3f  ratio: %.1fx",
+                weights.min(), weights.max(), weights.max() / weights.min())
+    return weights
+
+
 def train_baseline(
     X_train: np.ndarray,
     y_train: np.ndarray,
@@ -44,6 +74,10 @@ def train_baseline(
     """
     Train an XGBClassifier with the base hyperparameters and early stopping
     on validation mlogloss.
+
+    Uses inverse-frequency sample weights so XGBoost pays equal attention to
+    all classes regardless of how many training samples each has.  This
+    prevents rare/hard classes from being absorbed by dominant catch-all classes.
 
     Args:
         X_train, y_train: Training features (N, 1280) and integer labels.
@@ -56,9 +90,12 @@ def train_baseline(
     if params is None:
         params = config.XGB_BASE_PARAMS.copy()
 
+    sample_weights = compute_sample_weights(y_train)
+
     model = xgb.XGBClassifier(**params)
     model.fit(
         X_train, y_train,
+        sample_weight=sample_weights,
         eval_set=[(X_val, y_val)],
         verbose=50,
     )
@@ -149,13 +186,23 @@ def make_optuna_objective(
             params["reg_alpha"],
         )
 
-        model = xgb.XGBClassifier(**params)
-        scores = cross_val_score(
-            model, X_train, y_train,
-            cv=skf,
-            scoring="f1_macro",
-            n_jobs=1,           # XGBoost already uses all cores internally
-        )
+        # Manual CV loop — avoids sklearn fit_params deprecation warning and
+        # computes sample weights per fold (more correct than global weights).
+        fold_scores = []
+        for fold_train_idx, fold_val_idx in skf.split(X_train, y_train):
+            X_fold_tr = X_train[fold_train_idx]
+            y_fold_tr = y_train[fold_train_idx]
+            X_fold_val = X_train[fold_val_idx]
+            y_fold_val = y_train[fold_val_idx]
+
+            fold_weights = compute_sample_weights(y_fold_tr)
+
+            fold_model = xgb.XGBClassifier(**params)
+            fold_model.fit(X_fold_tr, y_fold_tr, sample_weight=fold_weights)
+            fold_preds = fold_model.predict(X_fold_val)
+            fold_scores.append(f1_score(y_fold_val, fold_preds, average="macro"))
+
+        scores  = np.array(fold_scores)
         mean_f1 = float(scores.mean())
         std_f1  = float(scores.std())
 
@@ -241,8 +288,15 @@ def retrain_best(
         "random_state": config.RANDOM_STATE,
         **best_params,
     }
+    sample_weights = compute_sample_weights(y_train)
+
     model = xgb.XGBClassifier(**params)
-    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=50)
+    model.fit(
+        X_train, y_train,
+        sample_weight=sample_weights,
+        eval_set=[(X_val, y_val)],
+        verbose=50,
+    )
 
     val_preds = model.predict(X_val)
     val_f1 = f1_score(y_val, val_preds, average="macro")
