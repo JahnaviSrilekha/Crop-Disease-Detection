@@ -143,3 +143,10 @@ AUG_ZOOM_FACTOR = 0.10         # ±10%
 AUG_BRIGHTNESS_FACTOR = 0.20
 AUG_CONTRAST_FACTOR = 0.20
 AUG_NOISE_STDDEV = 0.05        # Applied AFTER preprocess_input (scale [-1,1]); 5% noise
+
+# ---------------------------------------------------------------------------
+# LangGraph inference workflow
+# ---------------------------------------------------------------------------
+# Predictions with top-1 confidence ≥ this threshold go through the
+# "high confidence" path; below it the workflow asks for a clearer image.
+CONFIDENCE_THRESHOLD = 0.60    # 60 % — adjust if too many low-confidence hits

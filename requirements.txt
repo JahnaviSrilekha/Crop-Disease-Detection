@@ -13,3 +13,4 @@ kaggle==1.6.11
 pytest==8.0.2
 tqdm==4.66.2
 imbalanced-learn==0.12.3
+langgraph>=0.2.0
