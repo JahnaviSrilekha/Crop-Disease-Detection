@@ -28,9 +28,7 @@ import tensorflow as tf
 
 import config
 from src.data_pipeline import (
-    build_augmentation_pipeline,
     build_class_index,
-    build_preprocessing_pipeline,
     image_generator,
     num_batches,
     scan_dataset,
@@ -266,22 +264,25 @@ def main() -> None:
         "Feature extractor output shape: %s", feature_extractor.output_shape
     )
 
-    aug_fn = build_augmentation_pipeline()
-    pre_fn = build_preprocessing_pipeline()
-
+    # IMPORTANT: pass preprocess_fn=None here.
+    # The fine-tuned feature_extractor already includes preprocess_input as its
+    # very first operation (ft_model's second layer after the Input), so it
+    # expects raw [0, 255] float32 pixels.  If aug_fn / pre_fn were passed,
+    # preprocess_input would run twice: once in image_generator and once inside
+    # the model — corrupting every feature vector and causing accuracy to DROP.
     splits = [
-        (train_df, config.FEATURES_DIR / "train_features_finetuned.npz", aug_fn, "Train"),
-        (val_df,   config.FEATURES_DIR / "val_features_finetuned.npz",   pre_fn, "Val"),
-        (test_df,  config.FEATURES_DIR / "test_features_finetuned.npz",  pre_fn, "Test"),
+        (train_df, config.FEATURES_DIR / "train_features_finetuned.npz", "Train"),
+        (val_df,   config.FEATURES_DIR / "val_features_finetuned.npz",   "Val"),
+        (test_df,  config.FEATURES_DIR / "test_features_finetuned.npz",  "Test"),
     ]
 
     logger.info("Re-extracting features with fine-tuned model...")
-    for split_df, out_path, preprocess_fn, desc in splits:
+    for split_df, out_path, desc in splits:
         gen = image_generator(
             split_df["filepath"].tolist(),
             split_df["label_int"].values,
             batch_size=config.BATCH_SIZE,
-            preprocess_fn=preprocess_fn,
+            preprocess_fn=None,   # model handles preprocess_input internally
         )
         X, y = extract_features(
             feature_extractor,

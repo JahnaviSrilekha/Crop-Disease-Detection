@@ -122,3 +122,48 @@ def friendly_label(raw_name: str) -> str:
     """Return a human-readable label, e.g. 'Tomato — Late blight'."""
     crop, disease = parse_class_name(raw_name)
     return f"{crop} — {disease}"
+
+
+# ---------------------------------------------------------------------------
+# Config auto-update after Optuna
+# ---------------------------------------------------------------------------
+
+# Params Optuna tunes that map directly into XGB_BASE_PARAMS.
+# Integer params are written without a decimal point.
+_XGB_INT_PARAMS = {"n_estimators", "max_depth", "min_child_weight"}
+
+
+def update_config_xgb_params(best_params: dict) -> dict:
+    """
+    Write Optuna's best_params back into XGB_BASE_PARAMS inside config.py
+    so the next run starts from the best known values.
+
+    Only the keys Optuna tuned are updated.  Fixed keys like objective,
+    num_class, device, and random_state are never touched.
+
+    Args:
+        best_params: dict returned by ``study.best_params``
+
+    Returns:
+        Dict of {param: new_value_string} for the params that were updated.
+    """
+    config_path = Path(__file__).parent.parent / "config.py"
+    text = config_path.read_text()
+
+    updated = {}
+    for key, value in best_params.items():
+        # Format value: integers without decimal, floats to 4 sig. figures
+        if key in _XGB_INT_PARAMS:
+            new_val = str(int(round(value)))
+        else:
+            new_val = f"{float(value):.4f}"
+
+        # Matches  "key": <old_number>  anywhere in the file
+        pattern = rf'("{re.escape(key)}":\s*)([\d.e+\-]+)'
+        new_text, n_replaced = re.subn(pattern, rf"\g<1>{new_val}", text)
+        if n_replaced:
+            updated[key] = new_val
+            text = new_text
+
+    config_path.write_text(text)
+    return updated

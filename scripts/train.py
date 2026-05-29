@@ -38,7 +38,7 @@ from src.evaluate import (
 )
 from src.feature_extractor import load_features
 from src.preprocessor import run_preprocessing
-from src.utils import get_logger, load_label_encoder, setup_output_dirs
+from src.utils import get_logger, load_label_encoder, setup_output_dirs, update_config_xgb_params
 
 logger = get_logger("train")
 
@@ -65,7 +65,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--skip-preprocessing",
         action="store_true",
-        help="Skip SMOTE + PCA; train XGBoost on raw 1280-dim features.",
+        default=not config.USE_SMOTE,
+        help="Skip SMOTE + PCA; train XGBoost on raw 1280-dim features. "
+             "Defaults to the inverse of config.USE_SMOTE (currently %s)." % ("enabled" if config.USE_SMOTE else "disabled"),
     )
     return p.parse_args()
 
@@ -157,6 +159,13 @@ def main() -> None:
 
         # Save Optuna history plot
         plot_optuna_history(study, config.PLOTS_DIR / "optuna_history.png")
+
+        # Persist best params back into config.py so the next run uses them as baseline
+        updated = update_config_xgb_params(study.best_params)
+        logger.info(
+            "config.py XGB_BASE_PARAMS updated with Optuna best — %s",
+            ", ".join(f"{k}={v}" for k, v in updated.items()),
+        )
 
         # Retrain with best params on full training set
         logger.info("Retraining with best Optuna params...")
