@@ -254,7 +254,10 @@ def main() -> None:
     logger.info("Best validation accuracy during fine-tuning: %.4f", best_val_acc)
 
     # ── Extract improved features using the fine-tuned base ────────────────
-    # Strip the Dense head — keep input → base → GAP as the feature extractor
+    # Strip the Dense head — keep input → preprocess_input → base → GAP.
+    # NOTE: ft_model.input feeds raw [0,255] pixels; preprocess_input is the
+    # SECOND layer inside the model.  The feature_extractor therefore also
+    # expects raw [0,255] pixels — do NOT apply preprocess_input externally.
     feature_extractor = tf.keras.Model(
         inputs=ft_model.input,
         outputs=ft_model.get_layer("global_average_pooling2d").output,
@@ -263,6 +266,11 @@ def main() -> None:
     logger.info(
         "Feature extractor output shape: %s", feature_extractor.output_shape
     )
+
+    # Save to disk so inference.py can load the exact same model that produced
+    # the features XGBoost was trained on.
+    feature_extractor.save(str(config.FINETUNED_EXTRACTOR_PATH))
+    logger.info("Fine-tuned feature extractor saved → %s", config.FINETUNED_EXTRACTOR_PATH)
 
     # IMPORTANT: pass preprocess_fn=None here.
     # The fine-tuned feature_extractor already includes preprocess_input as its

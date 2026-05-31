@@ -1,18 +1,19 @@
 """
 CLI: End-to-end training pipeline.
 
-Loads cached features → SMOTE oversampling → StandardScaler + PCA →
-trains XGBoost baseline → optionally runs Optuna tuning → evaluates on
-test set → saves model and all output artefacts.
+Loads cached features → trains XGBoost baseline → optionally runs Optuna
+tuning → evaluates on test set → saves model and all output artefacts.
+
+XGBoost's inverse-frequency sample weights handle the 21× class imbalance
+directly — rare classes receive proportionally stronger gradient signal.
 
 Usage:
-  python scripts/train.py                        # Full run with Optuna tuning
-  python scripts/train.py --skip-tuning          # Baseline only (fast)
-  python scripts/train.py --n-trials 20          # Fewer Optuna trials
-  python scripts/train.py --subsample 0.1        # Use 10% feature cache (for testing)
-  python scripts/train.py --skip-preprocessing   # Skip SMOTE+PCA (use raw 1280-dim features)
+  python scripts/train.py                  # Full run with Optuna tuning
+  python scripts/train.py --skip-tuning   # Baseline only (fast)
+  python scripts/train.py --n-trials 20   # Override number of Optuna trials
+  python scripts/train.py --subsample 0.1 # Use 10% of cache (quick smoke-test)
 
-Requires feature caches to exist. Run scripts/extract_features.py first.
+Requires feature caches to exist. Run scripts/finetune.py first.
 """
 
 import argparse
@@ -37,7 +38,6 @@ from src.evaluate import (
     save_classification_report,
 )
 from src.feature_extractor import load_features
-from src.preprocessor import run_preprocessing
 from src.utils import get_logger, load_label_encoder, setup_output_dirs, update_config_xgb_params
 
 logger = get_logger("train")
@@ -62,13 +62,6 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="Fraction of cached features to use (0 < x <= 1.0). Default: 1.0.",
     )
-    p.add_argument(
-        "--skip-preprocessing",
-        action="store_true",
-        default=not config.USE_SMOTE,
-        help="Skip SMOTE + PCA; train XGBoost on raw 1280-dim features. "
-             "Defaults to the inverse of config.USE_SMOTE (currently %s)." % ("enabled" if config.USE_SMOTE else "disabled"),
-    )
     return p.parse_args()
 
 
@@ -79,7 +72,7 @@ def _check_caches() -> None:
     ]
     if missing:
         logger.error(
-            "Missing feature caches:\n%s\nRun scripts/extract_features.py first.",
+            "Missing feature caches:\n%s\nRun scripts/finetune.py first.",
             "\n".join(f"  {p}" for p in missing),
         )
         sys.exit(1)
@@ -114,36 +107,16 @@ def main() -> None:
             len(X_train), len(X_val), len(X_test),
         )
 
-    # Load label encoder (written by extract_features.py)
+    # ---- Load label encoder -------------------------------------------------
     if not config.LABEL_ENCODER_PATH.exists():
         logger.error(
-            "Label encoder not found at %s. Run scripts/extract_features.py first.",
+            "Label encoder not found at %s. Run scripts/finetune.py first.",
             config.LABEL_ENCODER_PATH,
         )
         sys.exit(1)
     le = load_label_encoder(config.LABEL_ENCODER_PATH)
     label_names = list(le.classes_)
     logger.info("Classes: %d labels loaded", len(label_names))
-
-    # ---- SMOTE + StandardScaler + PCA ---------------------------------------
-    # NOTE: SMOTE and sample weights (in classifier.py) are REDUNDANT.
-    # SMOTE balances classes → weights become ~1.0 → weights do nothing.
-    # Skipping SMOTE lets the natural 21x imbalance stand so sample weights
-    # are meaningful (rare class samples get up to 21x higher gradient signal).
-    if args.skip_preprocessing:
-        logger.info(
-            "Skipping SMOTE + PCA (--skip-preprocessing). "
-            "Sample weights in XGBoost will handle class imbalance directly."
-        )
-    else:
-        logger.info("Running SMOTE oversampling + StandardScaler + PCA...")
-        X_train, y_train, X_val, X_test, _scaler, _pca = run_preprocessing(
-            X_train, y_train, X_val, X_test
-        )
-        logger.info(
-            "Preprocessing complete — train: %s, val: %s, test: %s",
-            X_train.shape, X_val.shape, X_test.shape,
-        )
 
     # ---- Baseline training --------------------------------------------------
     logger.info("Training baseline XGBoost model...")
