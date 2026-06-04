@@ -42,9 +42,9 @@ REPORTS_DIR = OUTPUTS_DIR / "reports"
 # to train XGBoost on the improved fine-tuned features.
 FEATURE_SOURCE = "finetuned"          # "224" = frozen MobileNetV2 | "finetuned" = fine-tuned
 _size_tag = f"{INPUT_SIZE[0]}"
-TRAIN_FEATURES_PATH = FEATURES_DIR / f"train_features_{FEATURE_SOURCE}.npz"
-VAL_FEATURES_PATH   = FEATURES_DIR / f"val_features_{FEATURE_SOURCE}.npz"
-TEST_FEATURES_PATH  = FEATURES_DIR / f"test_features_{FEATURE_SOURCE}.npz"
+TRAIN_FEATURES_PATH = FEATURES_DIR / f"train_features_finetuned.npz"
+VAL_FEATURES_PATH   = FEATURES_DIR / f"val_features_finetuned.npz"
+TEST_FEATURES_PATH  = FEATURES_DIR / f"test_features_finetuned.npz"
 
 # Saved model artifacts
 XGB_MODEL_PATH = MODELS_DIR / "xgb_model.json"
