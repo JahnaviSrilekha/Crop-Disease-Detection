@@ -9,6 +9,8 @@ Metric choices:
 - Top-3 accuracy — practical for farmer UI: "here are the 3 most likely diseases".
 - Per-class breakdown — identifies the hardest classes for targeted improvement.
 """
+import plotly.express as px
+import plotly.graph_objects as go
 
 from pathlib import Path
 
@@ -233,3 +235,63 @@ _CROP_COLORS = {
 
 def _crop_color(crop: str) -> str:
     return _CROP_COLORS.get(crop, "#1f77b4")
+
+
+from sklearn.metrics import confusion_matrix as sklearn_cm
+import plotly.express as px
+
+def plot_confusion_matrix_plotly(y_true, y_pred, classes, output_path):
+    """
+    Generates an interactive, hoverable HTML Confusion Matrix.
+    """
+    # 1. Dynamically calculate the matrix from the true and predicted labels
+    cm = sklearn_cm(y_true, y_pred)
+    
+    # 2. Build the Plotly heatmap
+    fig = px.imshow(
+        cm,
+        labels=dict(x="Predicted Label", y="True Label", color="Count"),
+        x=classes,
+        y=classes,
+        text_auto=True, 
+        color_continuous_scale="Viridis"
+    )
+    fig.update_layout(
+        title={'text': "Interactive Confusion Matrix (Test Set)", 'y': 0.95, 'x': 0.5, 'xanchor': 'center'},
+        xaxis_tickangle=-45,
+        width=900,
+        height=800
+    )
+    
+    # 3. Convert path and save as HTML
+    html_path = str(output_path).replace(".png", ".html")
+    fig.write_html(html_path)
+    print(f"[INFO] Interactive confusion matrix saved to: {html_path}")
+
+def plot_per_class_f1_plotly(f1_scores, classes, output_path):
+    """
+    Generates an interactive, hoverable HTML Bar Chart for F1-Scores.
+    """
+    sorted_data = sorted(zip(classes, f1_scores), key=lambda x: x[1], reverse=True)
+    sorted_classes, sorted_f1 = zip(*sorted_data)
+
+    fig = px.bar(
+        x=sorted_classes,
+        y=sorted_f1,
+        labels={'x': "Plant Disease Category", 'y': "F1-Score"},
+        color=sorted_f1,
+        color_continuous_scale="Cividis"
+    )
+    fig.update_layout(
+        title={'text': "Per-Class F1-Score Performance Analysis", 'y': 0.95, 'x': 0.5, 'xanchor': 'center'},
+        yaxis_range=[0, 1.1],
+        xaxis_tickangle=-45,
+        width=1000,
+        height=600,
+        showlegend=False
+    )
+    fig.add_hline(y=0.95, line_dash="dash", line_color="green", annotation_text="95% Target")
+    
+    html_path = str(output_path).replace(".png", ".html")
+    fig.write_html(html_path)
+    print(f"[INFO] Interactive F1 chart saved to: {html_path}")

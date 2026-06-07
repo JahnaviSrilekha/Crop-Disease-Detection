@@ -36,6 +36,8 @@ from src.evaluate import (
     plot_optuna_history,
     plot_per_class_f1,
     save_classification_report,
+    plot_confusion_matrix_plotly, #added for interactive confusion matrix
+    plot_per_class_f1_plotly, #added for interactive per-class F1 plot
 )
 from src.feature_extractor import load_features
 from src.utils import get_logger, load_label_encoder, setup_output_dirs, update_config_xgb_params
@@ -170,6 +172,17 @@ def main() -> None:
         metrics["per_class"], label_names,
         config.PLOTS_DIR / "per_class_f1.png",
     )
+
+       # NEW: Your interactive hoverable dashboards
+    plot_confusion_matrix_plotly(
+        y_test, y_pred, label_names,
+        config.PLOTS_DIR / "confusion_matrix.png",
+    )
+    plot_per_class_f1_plotly(
+        metrics["per_class"], label_names,
+        config.PLOTS_DIR / "per_class_f1.png",
+    )
+
     save_classification_report(
         final_model, X_test, y_test, label_names,
         config.REPORTS_DIR / "classification_report.txt",
